@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ReportStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Platform {
+  X
+  LINKEDIN
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  reports   Report[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+}
+
+model Report {
+  id                 String       @id @default(cuid())
+
+  leadId             String
+  lead               Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  profileUrl          String
+  platform            Platform
+  profileHandle       String
+  status              ReportStatus @default(PROCESSING)
+
+  providerUsed        String?
+  rawPosts            Json?
+  normalizedData      Json?
+  metrics             Json?
+  classifications     Json?
+  finalReport         Json?
+
+  latestPostId        String?
+  latestPostDate      DateTime?
+  postsAnalyzedCount  Int          @default(0)
+  errorMessage        String?
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([leadId])
+  @@index([platform, profileHandle])
+  @@index([status])
+  @@index([createdAt])
+}
