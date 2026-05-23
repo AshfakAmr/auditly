@@ -3,6 +3,8 @@ import * as z from "zod";
 
 import { buildDeterministicAudit } from "@/lib/audit/build-deterministic-audit";
 
+import { runGeminiAudit } from "@/lib/ai/run-gemini-audit";
+
 import { prisma } from "@/lib/db/prisma";
 import { fetchProfilePosts } from "@/lib/social/fetch-profile-posts";
 import { resolveProfileUrl } from "@/lib/social/resolve-profile-url";
@@ -83,6 +85,11 @@ export async function POST(request: Request) {
 
     const { normalizedPosts, metrics } = buildDeterministicAudit(rawPosts);
 
+    const { classifications, finalReport } = await runGeminiAudit({
+      normalizedPosts,
+      metrics,
+    });
+
     if (!latestPost) {
       return NextResponse.json(
         {
@@ -129,11 +136,13 @@ export async function POST(request: Request) {
         profileUrl: resolvedProfile.profileUrl,
         platform: resolvedProfile.platform,
         profileHandle: resolvedProfile.profileHandle,
-        status: "PROCESSING",
+        status: "COMPLETED",
         providerUsed,
         rawPosts: toJsonValue(rawPosts),
         normalizedData: toJsonValue(normalizedPosts),
         metrics: toJsonValue(metrics),
+        classifications: toJsonValue(classifications),
+        finalReport: toJsonValue(finalReport),
         postsAnalyzedCount: rawPosts.length,
         latestPostId: latestPost.id,
         latestPostDate: new Date(latestPost.postedAt),
