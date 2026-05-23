@@ -1,10 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import type { ComponentProps } from "react";
+import { useState } from "react";
 import { ArrowRight, Loader2, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useRouter } from "next/navigation";
 
 const steps = [
   {
@@ -25,24 +27,44 @@ const steps = [
 ];
 
 export function LandingPage() {
+  const router = useRouter();
   const [profileUrlOrHandle, setProfileUrlOrHandle] = useState("");
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = async (
+    event,
+  ) => {
     event.preventDefault();
 
     setIsSubmitting(true);
 
-    console.log({
-      profileUrlOrHandle,
-      email,
-    });
+    try {
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          profileUrlOrHandle,
+          email,
+        }),
+      });
 
-    setTimeout(() => {
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Could not create report.");
+      }
+
+      router.push(data.reportUrl);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : "Something went wrong.");
+    } finally {
       setIsSubmitting(false);
-    }, 900);
-  }
+    }
+  };
 
   return (
     <main className="min-h-dvh bg-[#1f1f1d] p-4 text-[#f4f2ea] md:h-dvh md:overflow-hidden md:p-5">
