@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { finalReportSchema } from "@/lib/ai/schemas";
 
 import {
   ReportPageShell,
@@ -161,18 +162,33 @@ export default async function ReportPage({ params }: ReportPageProps) {
   if (!report) {
     notFound();
   }
+const parsedFinalReport = finalReportSchema.safeParse(report.finalReport);
 
-  const viewModel = buildPendingReportViewModel({
+if (parsedFinalReport.success) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+  const viewModel: ReportPageViewModel = {
     id: report.id,
     profileHandle: report.profileHandle,
     profileUrl: report.profileUrl,
     platform: report.platform,
     status: report.status,
-    providerUsed: report.providerUsed,
+    email: report.lead.email,
+    generatedAt: formatDate(report.createdAt),
+    reportUrl: `${appUrl}/report/${report.id}`,
+    overallScore: Math.round(parsedFinalReport.data.overallScore),
     postsAnalyzedCount: report.postsAnalyzedCount,
-    createdAt: report.createdAt,
-    lead: report.lead,
-  });
+    dateRangeLabel: "Recent public posts",
+    providerUsed: report.providerUsed ?? "Unknown provider",
+    topPattern: parsedFinalReport.data.topPattern,
+    weakestPattern: parsedFinalReport.data.weakestPattern,
+    sections: parsedFinalReport.data.sections.map((section) => ({
+      ...section,
+      score: Math.round(section.score),
+    })),
+    recommendations: parsedFinalReport.data.recommendations,
+  };
 
   return <ReportPageShell report={viewModel} />;
+}
 }
