@@ -1,5 +1,14 @@
 export type Platform = "X" | "LINKEDIN";
 
+export type MediaType =
+  | "text"
+  | "image"
+  | "video"
+  | "link"
+  | "poll"
+  | "carousel"
+  | "unknown";
+
 export type RawPost = {
   id: string;
   platform: Platform;
@@ -11,6 +20,25 @@ export type RawPost = {
   commentCount: number;
   repostCount: number;
   viewCount?: number;
+  raw?: unknown;
+};
+
+export type NormalizedPost = {
+  id: string;
+  platform: Platform;
+  profileHandle: string;
+  url: string;
+  text: string;
+  firstLine: string;
+  postedAt: string;
+  mediaType: MediaType;
+  engagement: {
+    likeCount: number;
+    commentCount: number;
+    repostCount: number;
+    viewCount?: number;
+    totalEngagement: number;
+  };
   raw?: unknown;
 };
 

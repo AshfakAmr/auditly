@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import * as z from "zod";
 
+import { buildDeterministicAudit } from "@/lib/audit/build-deterministic-audit";
+
 import { prisma } from "@/lib/db/prisma";
 import { fetchProfilePosts } from "@/lib/social/fetch-profile-posts";
 import { resolveProfileUrl } from "@/lib/social/resolve-profile-url";
@@ -79,6 +81,8 @@ export async function POST(request: Request) {
 
     const latestPost = getLatestPost(rawPosts);
 
+    const { normalizedPosts, metrics } = buildDeterministicAudit(rawPosts);
+
     if (!latestPost) {
       return NextResponse.json(
         {
@@ -128,6 +132,8 @@ export async function POST(request: Request) {
         status: "PROCESSING",
         providerUsed,
         rawPosts: toJsonValue(rawPosts),
+        normalizedData: toJsonValue(normalizedPosts),
+        metrics: toJsonValue(metrics),
         postsAnalyzedCount: rawPosts.length,
         latestPostId: latestPost.id,
         latestPostDate: new Date(latestPost.postedAt),
