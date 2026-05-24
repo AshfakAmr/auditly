@@ -2,11 +2,12 @@
 
 import type { ComponentProps } from "react";
 import { useState } from "react";
-import { ArrowRight, Loader2, Lock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, ArrowRight, Loader2, Lock } from "lucide-react";
 
+import { AuditProgressScreen } from "@/components/landing/audit-progress-screen";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useRouter } from "next/navigation";
 
 const steps = [
   {
@@ -31,13 +32,23 @@ export function LandingPage() {
   const [profileUrlOrHandle, setProfileUrlOrHandle] = useState("");
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = async (
     event,
   ) => {
     event.preventDefault();
 
+    setSubmitError(null);
     setIsSubmitting(true);
+    setActiveStepIndex(0);
+
+    let didRedirect = false;
+
+    const progressTimer = window.setInterval(() => {
+      setActiveStepIndex((currentStep) => Math.min(currentStep + 1, 6));
+    }, 1800);
 
     try {
       const response = await fetch("/api/reports", {
@@ -51,20 +62,37 @@ export function LandingPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as {
+        ok?: boolean;
+        reportUrl?: string;
+        message?: string;
+      };
 
-      if (!response.ok || !data.ok) {
+      if (!response.ok || !data.ok || !data.reportUrl) {
         throw new Error(data.message ?? "Could not create report.");
       }
 
+      setActiveStepIndex(6);
+      didRedirect = true;
       router.push(data.reportUrl);
     } catch (error) {
-      console.error(error);
-      alert(error instanceof Error ? error.message : "Something went wrong.");
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while generating the report.",
+      );
     } finally {
-      setIsSubmitting(false);
+      window.clearInterval(progressTimer);
+
+      if (!didRedirect) {
+        setIsSubmitting(false);
+      }
     }
   };
+
+  if (isSubmitting) {
+    return <AuditProgressScreen activeStepIndex={activeStepIndex} />;
+  }
 
   return (
     <main className="min-h-dvh bg-[#1f1f1d] p-4 text-[#f4f2ea] md:h-dvh md:overflow-hidden md:p-5">
@@ -101,6 +129,19 @@ export function LandingPage() {
               onSubmit={handleSubmit}
               className="mt-12 w-full max-w-[580px] space-y-5 text-left"
             >
+              {submitError ? (
+                <div className="mb-5 flex gap-3 rounded-lg border border-[#7a4d4d] bg-[#3a2929] p-4 text-left">
+                  <AlertCircle className="mt-0.5 size-4 shrink-0 text-[#ff8a8a]" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      Could not generate report
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-[#f0b8b8]">
+                      {submitError}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <label
                   htmlFor="profile"
