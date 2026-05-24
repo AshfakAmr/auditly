@@ -258,7 +258,7 @@ export class ApifyXProvider implements SocialProvider {
       process.env.APIFY_X_SCRAPERONE_ACTOR_ID ??
       "scraper_one/x-profile-posts-scraper";
 
-    const limit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 10);
+    const limit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 20);
 
     const client = new ApifyClient({
       token,

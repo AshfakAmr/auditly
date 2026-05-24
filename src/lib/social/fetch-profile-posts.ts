@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ApifyXProvider } from "@/lib/social/providers/apify-x-provider";
-import { ParseForgeXProvider } from "@/lib/social/providers/parseforge-x-provider";
+import { IgolaizolaXProvider } from "@/lib/social/providers/igolaizola-x-provider";
 import type {
   FetchPostsInput,
   RawPost,
@@ -29,9 +29,9 @@ function dedupeAndSortPosts(posts: RawPost[]) {
 export async function fetchProfilePosts(
   input: FetchPostsInput,
 ): Promise<SocialProviderResult> {
-  const targetLimit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 10);
+  const targetLimit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 20);
 
-  const providers = [new ParseForgeXProvider(), new ApifyXProvider()];
+  const providers = [new IgolaizolaXProvider(), new ApifyXProvider()];
 
   const allPosts: RawPost[] = [];
   const usedProviders: string[] = [];
@@ -88,41 +88,3 @@ export async function fetchProfilePosts(
     )}`,
   );
 }
-
-// This is to check the limit of the actor if finished then run another actor
-
-// for (const provider of providers) {
-//   try {
-//     console.log(`[SOCIAL_PROVIDER_START] ${provider.name}`);
-
-//     const posts = await provider.fetchPosts({
-//       ...input,
-//       limit: targetLimit,
-//     });
-
-//     console.log(`[SOCIAL_PROVIDER_SUCCESS] ${provider.name}`, {
-//       count: posts.length,
-//     });
-
-//     if (posts.length > 0) {
-//       usedProviders.push(provider.name);
-//       allPosts.push(...posts);
-//     }
-
-//     const mergedPosts = dedupeAndSortPosts(allPosts);
-
-//     if (mergedPosts.length >= targetLimit) {
-//       return {
-//         providerUsed: usedProviders.join(" + "),
-//         rawPosts: mergedPosts.slice(0, targetLimit),
-//       };
-//     }
-//   } catch (error) {
-//     const message =
-//       error instanceof Error ? error.message : "Unknown provider error";
-
-//     console.error(`[SOCIAL_PROVIDER_FAILED] ${provider.name}`, message);
-
-//     errors.push(`${provider.name}: ${message}`);
-//   }
-// }
