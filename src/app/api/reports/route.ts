@@ -75,20 +75,55 @@ export async function POST(request: Request) {
       },
     });
 
+    // 1. Cache-first reuse: no Apify, no Gemini
+    const cacheWindowHours = Number(
+      process.env.REPORT_CACHE_WINDOW_HOURS ?? 24,
+    );
+    const cacheWindowStart = new Date(
+      Date.now() - cacheWindowHours * 60 * 60 * 1000,
+    );
+
+    const recentCompletedReport = await prisma.report.findFirst({
+      where: {
+        platform: resolvedProfile.platform,
+        profileHandle: resolvedProfile.profileHandle,
+        status: "COMPLETED",
+        createdAt: {
+          gte: cacheWindowStart,
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        status: true,
+        profileHandle: true,
+        platform: true,
+        providerUsed: true,
+        postsAnalyzedCount: true,
+      },
+    });
+
+    if (recentCompletedReport) {
+      return NextResponse.json({
+        ok: true,
+        reused: true,
+        cacheHit: true,
+        reportId: recentCompletedReport.id,
+        reportUrl: `/report/${recentCompletedReport.id}`,
+        report: recentCompletedReport,
+      });
+    }
+
+    // 2. No recent cache, now fetch posts
     const { providerUsed, rawPosts } = await fetchProfilePosts({
       profileUrl: resolvedProfile.profileUrl,
       profileHandle: resolvedProfile.profileHandle,
-      limit: Number(process.env.APIFY_POST_LIMIT ?? 30),
+      limit: Number(process.env.APIFY_POST_LIMIT ?? 10),
     });
 
     const latestPost = getLatestPost(rawPosts);
-
-    const { normalizedPosts, metrics } = buildDeterministicAudit(rawPosts);
-
-    const { classifications, finalReport } = await runGeminiAudit({
-      normalizedPosts,
-      metrics,
-    });
 
     if (!latestPost) {
       return NextResponse.json(
@@ -100,14 +135,13 @@ export async function POST(request: Request) {
       );
     }
 
+    // 3. If latest post already matches an old report, skip Gemini
     const existingReport = await prisma.report.findFirst({
       where: {
         platform: resolvedProfile.platform,
         profileHandle: resolvedProfile.profileHandle,
         latestPostId: latestPost.id,
-        status: {
-          in: ["PROCESSING", "COMPLETED"],
-        },
+        status: "COMPLETED",
       },
       orderBy: {
         createdAt: "desc",
@@ -117,6 +151,8 @@ export async function POST(request: Request) {
         status: true,
         profileHandle: true,
         platform: true,
+        providerUsed: true,
+        postsAnalyzedCount: true,
       },
     });
 
@@ -124,11 +160,20 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         reused: true,
+        cacheHit: false,
         reportId: existingReport.id,
         reportUrl: `/report/${existingReport.id}`,
         report: existingReport,
       });
     }
+
+    // 4. Only now run metrics + Gemini
+    const { normalizedPosts, metrics } = buildDeterministicAudit(rawPosts);
+
+    const { classifications, finalReport } = await runGeminiAudit({
+      normalizedPosts,
+      metrics,
+    });
 
     const report = await prisma.report.create({
       data: {
