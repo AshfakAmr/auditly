@@ -1,0 +1,1 @@
+// coming soon when the linkedIn provider is ready. For now, we return an error message in the API route handler if the user tries to use a LinkedIn profile. See src/app/api/reports/route.ts for the relevant code snippet.
