@@ -120,7 +120,7 @@ export async function POST(request: Request) {
     const { providerUsed, rawPosts } = await fetchProfilePosts({
       profileUrl: resolvedProfile.profileUrl,
       profileHandle: resolvedProfile.profileHandle,
-      limit: Number(process.env.APIFY_POST_LIMIT ?? 10),
+      limit: Number(process.env.APIFY_POST_LIMIT ?? 20),
     });
 
     const latestPost = getLatestPost(rawPosts);

@@ -15,18 +15,9 @@ function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === "object" ? (value as UnknownRecord) : {};
 }
 
-function getByPath(item: UnknownRecord, path: string): unknown {
-  if (path in item) return item[path];
-
-  return path.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object") return undefined;
-    return (current as UnknownRecord)[key];
-  }, item);
-}
-
 function getString(item: UnknownRecord, keys: string[]) {
   for (const key of keys) {
-    const value = getByPath(item, key);
+    const value = item[key];
 
     if (typeof value === "string" && value.trim()) {
       return value.trim();
@@ -42,7 +33,7 @@ function getString(item: UnknownRecord, keys: string[]) {
 
 function getNumber(item: UnknownRecord, keys: string[]) {
   for (const key of keys) {
-    const value = getByPath(item, key);
+    const value = item[key];
 
     if (typeof value === "number" && Number.isFinite(value)) {
       return value;
@@ -86,21 +77,38 @@ function parseDate(value: string) {
   return parsed.toISOString();
 }
 
-function mapParseForgeItemToRawPost(
+function isReply(item: UnknownRecord) {
+  const replyingTo = item.replyingTo;
+
+  if (Array.isArray(replyingTo)) {
+    return replyingTo.length > 0;
+  }
+
+  if (typeof replyingTo === "string") {
+    return replyingTo.trim().length > 0;
+  }
+
+  return Boolean(replyingTo);
+}
+
+function isRetweet(item: UnknownRecord) {
+  return item.isRetweet === true || Boolean(getString(item, ["retweetedBy"]));
+}
+
+function mapIgolaizolaItemToRawPost(
   itemValue: unknown,
   profileHandle: string,
 ): RawPost | null {
   const item = asRecord(itemValue);
 
-  const text = getString(item, ["fullText", "text", "postText"]);
+  // Extra safety: even though actor input excludes these, keep code-level guard.
+  if (isReply(item) || isRetweet(item)) {
+    return null;
+  }
 
-  const url = getString(item, ["url", "twitterUrl", "postUrl"]);
-
-  const createdAt = getString(item, [
-    "createdAt",
-    "timestamp",
-    "scrapedTimestamp",
-  ]);
+  const text = getString(item, ["text", "fullText", "html"]);
+  const url = getString(item, ["permalink", "url", "twitterUrl"]);
+  const createdAt = getString(item, ["createdAt", "displayTime"]);
 
   const postedAt = parseDate(createdAt);
 
@@ -108,35 +116,24 @@ function mapParseForgeItemToRawPost(
     return null;
   }
 
-  const directId = getString(item, [
-    "id",
-    "postId",
-    "conversationId",
-    "tweetId",
-  ]);
-
+  const directId = getString(item, ["id", "postId", "tweetId"]);
   const id =
     directId ||
     getIdFromUrl(url) ||
     createFallbackId(text, postedAt, profileHandle);
 
-  const likeCount = getNumber(item, [
-    "likeCount",
-    "favoriteCount",
-    "favouriteCount",
-  ]);
-
+  const likeCount = getNumber(item, ["likes", "likeCount", "favoriteCount"]);
   const commentCount = getNumber(item, [
+    "comments",
     "replyCount",
     "commentCount",
-    "comments",
   ]);
 
-  const retweetCount = getNumber(item, ["retweetCount", "repostCount"]);
-  const quoteCount = getNumber(item, ["quoteCount"]);
+  const retweetCount = getNumber(item, ["retweets", "retweetCount"]);
+  const quoteCount = getNumber(item, ["quotes", "quoteCount"]);
   const repostCount = retweetCount + quoteCount;
 
-  const viewCount = getNumber(item, ["viewCount", "views", "impressionCount"]);
+  const viewCount = getNumber(item, ["views", "viewCount", "impressionCount"]);
 
   return {
     id,
@@ -153,8 +150,8 @@ function mapParseForgeItemToRawPost(
   };
 }
 
-export class ParseForgeXProvider implements SocialProvider {
-  name = "apify:parseforge/x-com-scraper" as const;
+export class IgolaizolaXProvider implements SocialProvider {
+  name = "apify:igolaizola/x-twitter-scraper-ppe" as const;
   platform = "X" as const;
 
   async fetchPosts(input: FetchPostsInput): Promise<RawPost[]> {
@@ -165,25 +162,27 @@ export class ParseForgeXProvider implements SocialProvider {
     }
 
     const actorId =
-      process.env.APIFY_X_PARSEFORGE_ACTOR_ID ?? "parseforge/x-com-scraper";
+      process.env.APIFY_X_IGOLAIZOLA_ACTOR_ID ??
+      "igolaizola/x-twitter-scraper-ppe";
 
-    const limit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 10);
+    const limit = input.limit ?? Number(process.env.APIFY_POST_LIMIT ?? 20);
 
     const client = new ApifyClient({
       token,
     });
 
     const run = await client.actor(actorId).call({
-      startUrls: [
-        {
-          url: input.profileUrl,
-        },
-      ],
       maxItems: limit,
+      username: input.profileHandle,
+
+      // Original posts only.
+      replies: "exclude",
+      retweets: "exclude",
+      quotes: "exclude",
     });
 
     if (!run.defaultDatasetId) {
-      throw new Error("ParseForge actor did not return a dataset.");
+      throw new Error("Igolaizola actor did not return a dataset.");
     }
 
     const { items } = await client
@@ -191,11 +190,11 @@ export class ParseForgeXProvider implements SocialProvider {
       .listItems({ limit });
 
     if (items.length === 0) {
-      throw new Error("ParseForge returned zero posts.");
+      throw new Error("Igolaizola returned zero posts.");
     }
 
     const posts = items
-      .map((item) => mapParseForgeItemToRawPost(item, input.profileHandle))
+      .map((item) => mapIgolaizolaItemToRawPost(item, input.profileHandle))
       .filter((post): post is RawPost => Boolean(post))
       .sort(
         (a, b) =>
@@ -203,7 +202,7 @@ export class ParseForgeXProvider implements SocialProvider {
       );
 
     if (posts.length === 0) {
-      throw new Error("ParseForge returned posts, but none were usable.");
+      throw new Error("Igolaizola returned posts, but none were usable.");
     }
 
     return posts;

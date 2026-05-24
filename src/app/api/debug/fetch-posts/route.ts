@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   const result = await fetchProfilePosts({
     profileUrl: resolvedProfile.profileUrl,
     profileHandle: resolvedProfile.profileHandle,
-    limit: Number(process.env.APIFY_POST_LIMIT ?? 10),
+    limit: Number(process.env.APIFY_POST_LIMIT ?? 20),
   });
 
   return NextResponse.json({
