@@ -59,6 +59,8 @@ Why did it happen, what pattern is visible, and what should the creator improve 
 - Public X/Twitter profile audit
 - Email capture before report generation
 - Real public post fetching through a provider layer
+- Provider fallback support for better reliability
+- Original-post filtering to exclude replies and retweets
 - Persistent report URL using `/report/[id]`
 - Database-backed report storage
 - Deterministic content metrics
@@ -114,9 +116,22 @@ Prisma is used for type-safe database access and migrations. Neon PostgreSQL is 
 
 Gemini is used for language-based AI reasoning tasks such as hook quality classification, topic focus analysis, content intent classification, and final recommendation synthesis.
 
-### Apify Provider
+### Apify Provider Layer
 
-Apify is used to fetch real public X/Twitter post data. The app uses a provider-based architecture so the audit pipeline does not depend directly on one scraping provider.
+Apify is used to fetch real public X/Twitter post data.
+
+The app uses a provider-based architecture so the audit pipeline does not depend directly on one scraping provider.
+
+Current provider setup:
+
+```txt
+Primary provider: igolaizola/x-twitter-scraper-ppe
+Fallback provider: scraper_one/x-profile-posts-scraper
+```
+
+The primary provider is used to fetch recent original posts. The fallback provider is used when the primary provider fails or is rate-limited.
+
+The provider layer normalizes different actor outputs into one internal `RawPost` format before the audit pipeline starts.
 
 ---
 
@@ -133,7 +148,11 @@ Resolve profile URL / handle
         ↓
 Upsert Lead
         ↓
-Fetch public posts through provider
+Check recent completed report cache
+        ↓
+Fetch public posts through provider layer
+        ↓
+Filter out replies and retweets
         ↓
 Normalize posts
         ↓
@@ -147,6 +166,67 @@ Save report in PostgreSQL
         ↓
 Redirect to /report/[id]
 ```
+
+---
+
+## Social Provider Flow
+
+Auditly supports a provider fallback strategy for X/Twitter post fetching.
+
+Current order:
+
+```txt
+1. igolaizola/x-twitter-scraper-ppe
+2. scraper_one/x-profile-posts-scraper
+```
+
+The app attempts to fetch up to the configured post limit from the primary provider. If the primary provider fails, returns no usable posts, or hits provider limits, the app falls back to the secondary provider.
+
+The fetched posts are then:
+
+1. mapped into the common `RawPost` shape
+2. filtered for usable original posts
+3. deduplicated by post ID or URL
+4. sorted by latest publish date
+5. passed into the audit pipeline
+
+The app accepts both handle and full URL formats:
+
+```txt
+@sama
+sama
+https://x.com/sama
+https://twitter.com/sama
+```
+
+Internally, the input is resolved into:
+
+```txt
+profileHandle = sama
+profileUrl = https://x.com/sama
+```
+
+The primary provider uses the handle, while the fallback provider can use the full profile URL.
+
+---
+
+## Original Post Filtering
+
+Auditly is focused on auditing a creator’s own content strategy.
+
+The provider layer is configured to prioritize original posts and exclude noisy content types.
+
+Included:
+
+- original posts
+- normal timeline posts
+
+Excluded:
+
+- replies
+- retweets/reposts
+
+Quote posts may be excluded depending on provider configuration because they can mix original content with reshared content. This keeps the MVP report focused on the creator’s own direct publishing behavior.
 
 ---
 
@@ -263,9 +343,17 @@ Each report is a saved snapshot. Revisiting `/report/[id]` loads the saved repor
 
 ## Report Reuse Logic
 
-When the same profile is analyzed again, the app checks the latest fetched post.
+Auditly includes cache-first report reuse to reduce provider usage and AI cost.
 
-If the same profile has already been analyzed and the latest post has not changed, the app can reuse the existing completed report.
+If the same X/Twitter profile has already been analyzed within the configured cache window, the app returns the existing completed report without calling Apify or Gemini again.
+
+Default cache window:
+
+```txt
+24 hours
+```
+
+If the cache window has expired, the app can fetch posts again. If the latest post matches an already completed report, the app can reuse the old report and skip Gemini generation.
 
 This avoids unnecessary provider calls and AI calls.
 
@@ -315,8 +403,12 @@ GEMINI_API_KEY="your_gemini_api_key"
 GEMINI_MODEL="gemini-2.5-flash-lite"
 
 APIFY_TOKEN="your_apify_token"
-APIFY_X_ACTOR_ID="scraper_one/x-profile-posts-scraper"
-APIFY_POST_LIMIT="5"
+APIFY_POST_LIMIT="20"
+
+APIFY_X_IGOLAIZOLA_ACTOR_ID="igolaizola/x-twitter-scraper-ppe"
+APIFY_X_SCRAPERONE_ACTOR_ID="scraper_one/x-profile-posts-scraper"
+
+REPORT_CACHE_WINDOW_HOURS="24"
 
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
@@ -330,8 +422,12 @@ GEMINI_API_KEY="your_gemini_api_key"
 GEMINI_MODEL="gemini-2.5-flash-lite"
 
 APIFY_TOKEN="your_apify_token"
-APIFY_X_ACTOR_ID="scraper_one/x-profile-posts-scraper"
-APIFY_POST_LIMIT="5"
+APIFY_POST_LIMIT="20"
+
+APIFY_X_IGOLAIZOLA_ACTOR_ID="igolaizola/x-twitter-scraper-ppe"
+APIFY_X_SCRAPERONE_ACTOR_ID="scraper_one/x-profile-posts-scraper"
+
+REPORT_CACHE_WINDOW_HOURS="24"
 
 NEXT_PUBLIC_APP_URL="https://auditly-three.vercel.app"
 ```
@@ -423,6 +519,8 @@ The MVP supports:
 
 - X/Twitter profile analysis
 - real public post fetching
+- provider fallback for X/Twitter posts
+- original-post filtering
 - email capture
 - persistent report URLs
 - database-backed reports
@@ -438,16 +536,19 @@ The MVP supports:
 
 - The MVP fully supports X/Twitter first.
 - LinkedIn is shown as unsupported/coming soon because public LinkedIn data access is restricted.
-- Apify free-tier accounts have strict rate limits.
-- Demo analysis may use a small number of recent posts depending on provider limits.
+- The app depends on third-party Apify actors for public X/Twitter post fetching.
+- Provider pricing, result limits, and rate limits can change depending on the actor and Apify account.
+- If a provider fails or is rate-limited, the app falls back to the secondary provider when possible.
+- Demo analysis may use fewer posts if provider limits restrict available results.
 - The current system does not include login or a report-history dashboard.
 - Reports are saved as snapshots and are not automatically refreshed in the background.
+- Same-profile submissions within the cache window return the saved completed report.
 
 ---
 
 ## Future Improvements
 
-- Add fallback social data providers
+- Add more fallback social data providers
 - Add official X API support if budget allows
 - Add report history dashboard
 - Add authenticated user accounts
@@ -455,6 +556,7 @@ The MVP supports:
 - Add PDF export
 - Add deeper topic clustering
 - Add scheduled re-audits
+- Add a manual “force refresh” option
 - Add LinkedIn provider when a reliable compliant data source is available
 - Add team/workspace support
 - Add paid usage limits or credits
@@ -471,6 +573,7 @@ It demonstrates:
 - database modeling
 - provider-based architecture
 - real public data fetching
+- fallback provider handling
 - deterministic analytics
 - Gemini AI integration
 - multi-step agent workflow
@@ -484,10 +587,11 @@ It combines:
 
 - tools/functions
 - state
+- real provider data
 - deterministic calculations
 - AI classification
 - AI synthesis
 - database persistence
 - shareable report URLs
 
-This makes the workflow genuinely multi-step and more production-ready than a simple prompt-to-response implementation.
+The final report UI is generated from saved `finalReport` JSON, but that `finalReport` is created only after prior pipeline steps: post fetching, normalization, deterministic metrics, and AI classification.
